@@ -1,6 +1,6 @@
 """
 =============================================================
-  ANALISADOR PIS/COFINS MONOFÁSICO – NF-e  |  MVP
+  ANALISADOR PIS/COFINS MONOFÁSICO – NF-e  |  MVP v2
   Simples Nacional · Regime de Revenda · CST 04
 =============================================================
 Dependências:
@@ -21,7 +21,7 @@ from io import BytesIO
 #     Baseada na Tabela 4.3.10 da EFD-Contribuições (SPED)
 #     ► SUBSTITUA / EXPANDA esta lista conforme necessário
 # ─────────────────────────────────────────────────────────────
-TABELA_NCM_MONOFASICO: dict[str, str] = {
+TABELA_NCM_MONOFASICO: dict = {
     # ── Combustíveis e derivados ──────────────────────────────
     "27101112": "Gasolina automotiva comum",
     "27101113": "Gasolina automotiva premium",
@@ -30,7 +30,6 @@ TABELA_NCM_MONOFASICO: dict[str, str] = {
     "27101500": "Óleos lubrificantes",
     "27111100": "Gás natural liquefeito (GNL)",
     "27111910": "Gás liquefeito de petróleo (GLP)",
-
     # ── Farmacêuticos ─────────────────────────────────────────
     "30011000": "Glândulas e outros órgãos para usos opoterápicos",
     "30021000": "Antissoros e imunoglobulinas",
@@ -43,7 +42,6 @@ TABELA_NCM_MONOFASICO: dict[str, str] = {
     "30042000": "Medicamentos c/ antibióticos (doses)",
     "30043900": "Outros medicamentos hormonais",
     "30049099": "Outros medicamentos para uso humano",
-
     # ── Cosméticos / Higiene ──────────────────────────────────
     "33011000": "Óleos essenciais de frutas cítricas",
     "33012900": "Outros óleos essenciais",
@@ -62,7 +60,6 @@ TABELA_NCM_MONOFASICO: dict[str, str] = {
     "33071000": "Preparações para barbear",
     "33072000": "Desodorantes e antiperspirantes",
     "33074900": "Outros produtos de toucador",
-
     # ── Bebidas frias ─────────────────────────────────────────
     "22011000": "Água mineral / gaseificada",
     "22019000": "Outras águas",
@@ -70,7 +67,7 @@ TABELA_NCM_MONOFASICO: dict[str, str] = {
     "22029000": "Outras bebidas não alcoólicas",
     "22030000": "Cerveja de malte",
     "22060000": "Outras bebidas fermentadas",
-    "22071000": "Álcool etílico não desnaturado ≥ 80%",
+    "22071000": "Álcool etílico não desnaturado >= 80%",
     "22082000": "Aguardente de vinho (conhaque)",
     "22083000": "Uísque",
     "22084000": "Rum e tafia",
@@ -78,72 +75,91 @@ TABELA_NCM_MONOFASICO: dict[str, str] = {
     "22086000": "Vodca",
     "22087000": "Licores",
     "22089900": "Outras bebidas alcoólicas",
-
-    # ── Veículos (automóveis) ─────────────────────────────────
+    # ── Veículos ──────────────────────────────────────────────
     "87031000": "Veículos para neve, quadriciclos",
-    "87032100": "Automóveis cilindrada ≤ 1000 cm³",
-    "87032200": "Automóveis 1000 < cil. ≤ 1500 cm³",
-    "87032300": "Automóveis 1500 < cil. ≤ 3000 cm³",
-    "87032400": "Automóveis cil. > 3000 cm³",
-    "87033300": "Automóveis diesel cil. > 2500 cm³",
+    "87032100": "Automóveis cilindrada <= 1000 cm3",
+    "87032200": "Automóveis 1000 < cil. <= 1500 cm3",
+    "87032300": "Automóveis 1500 < cil. <= 3000 cm3",
+    "87032400": "Automóveis cil. > 3000 cm3",
+    "87033300": "Automóveis diesel cil. > 2500 cm3",
     "87060010": "Chassis c/ motor para automóveis",
     "87089900": "Outros acessórios para veículos",
-
     # ── Motos ─────────────────────────────────────────────────
-    "87111000": "Motos cilindrada ≤ 50 cm³",
-    "87112000": "Motos 50 < cil. ≤ 250 cm³",
-    "87113000": "Motos 250 < cil. ≤ 500 cm³",
-    "87114000": "Motos 500 < cil. ≤ 800 cm³",
-    "87115000": "Motos cil. > 800 cm³",
-
+    "87111000": "Motos cilindrada <= 50 cm3",
+    "87112000": "Motos 50 < cil. <= 250 cm3",
+    "87113000": "Motos 250 < cil. <= 500 cm3",
+    "87114000": "Motos 500 < cil. <= 800 cm3",
+    "87115000": "Motos cil. > 800 cm3",
     # ── Pneus ─────────────────────────────────────────────────
     "40111000": "Pneus novos para automóveis",
-    "40112000": "Pneus novos para ônibus/caminhões",
+    "40112000": "Pneus novos para onibus/caminhões",
     "40113000": "Pneus novos para aviões",
     "40114000": "Pneus novos para motocicletas",
     "40119100": "Pneus novos – outros",
     "40121100": "Pneus recauchutados para automóveis",
-    "40121200": "Pneus recauchutados para ônibus/caminhões",
+    "40121200": "Pneus recauchutados para onibus/caminhões",
 }
 
 
 # ─────────────────────────────────────────────────────────────
-#  2. LEITURA DE XML – NF-e
+#  2. LEITURA DE XML – NF-e (versão robusta)
 # ─────────────────────────────────────────────────────────────
-.fromstring(conteudo)
+def ler_xml_nfe(conteudo):
+    """
+    Recebe os bytes de um arquivo XML de NF-e e retorna
+    uma lista de dicionários, um por item da nota.
+
+    Estratégia robusta:
+      1. Remove BOM UTF-8 e espaços iniciais
+      2. Faz o parse normalmente
+      3. Busca <det> em qualquer profundidade via iter()
+         (ignora namespace — funciona com NF-e 3.x e 4.x,
+          nfeProc, enviNFe, com ou sem namespace)
+      4. Extrai campos pela tag local
+    """
+    # Remove BOM UTF-8 (EF BB BF) e espaços antes da declaração XML
+    if isinstance(conteudo, bytes):
+        conteudo = conteudo.lstrip(b"\xef\xbb\xbf").strip()
+
+    try:
+        root = ET.fromstring(conteudo)
     except ET.ParseError as e:
-        raise ValueError(f"XML inválido: {e}")
+        raise ValueError(f"Erro ao interpretar XML: {e}")
 
-    # Namespace padrão NF-e 4.0
-    ns = {"nfe": "http://www.portalfiscal.inf.br/nfe"}
+    # Helper: retorna a tag local sem namespace
+    def local(node):
+        t = node.tag
+        return t.split("}")[-1] if "}" in t else t
 
-    itens = []
-    # Tenta localizar os elementos <det> (detalhe de item)
-    dets = root.findall(".//nfe:det", ns)
-    if not dets:
-        # Fallback: sem namespace (XMLs simplificados / legados)
-        dets = root.findall(".//det")
-        ns = {}
+    # Helper: busca primeiro descendente com tag local
+    def find_local(el, tag):
+        for node in el.iter():
+            if local(node) == tag:
+                return node
+        return None
 
-    def _find(el, path):
-        if ns:
-            return el.find(path, ns)
-        tag = path.split(":")[-1] if ":" in path else path
-        return el.find(f".//{tag}")
-
-    def _text(el, path, default=""):
-        node = _find(el, path)
+    # Helper: texto de um descendente com tag local
+    def text_local(el, tag, default=""):
+        node = find_local(el, tag)
         return node.text.strip() if node is not None and node.text else default
 
+    # Localiza todos os <det> na árvore inteira
+    dets = [n for n in root.iter() if local(n) == "det"]
+
+    itens = []
     for det in dets:
-        descricao = _text(det, "nfe:prod/nfe:xProd") or _text(det, "prod/xProd")
-        ncm_raw   = _text(det, "nfe:prod/nfe:NCM")   or _text(det, "prod/NCM")
-        vProd     = _text(det, "nfe:prod/nfe:vProd")  or _text(det, "prod/vProd")
+        prod = find_local(det, "prod")
+        if prod is None:
+            continue
+
+        descricao = text_local(prod, "xProd")
+        ncm_raw   = text_local(prod, "NCM")
+        vprod_str = text_local(prod, "vProd")
 
         ncm = ncm_raw.replace(".", "").replace("-", "").strip()
 
         try:
-            valor = float(vProd.replace(",", "."))
+            valor = float(vprod_str.replace(",", "."))
         except ValueError:
             valor = 0.0
 
@@ -160,26 +176,24 @@ TABELA_NCM_MONOFASICO: dict[str, str] = {
 # ─────────────────────────────────────────────────────────────
 #  3. CLASSIFICAÇÃO POR TABELA DE NCM
 # ─────────────────────────────────────────────────────────────
-def classificar_item(ncm: str, tabela: dict[str, str]) -> tuple[str, str]:
+def classificar_item(ncm, tabela):
     """
     Retorna (classificacao, motivo).
-    A busca é feita do NCM mais específico (8 dígitos)
-    ao mais genérico (4 dígitos) para cobrir variações de tabela.
+    Busca do NCM mais específico (8 dígitos) ao mais genérico (4 dígitos).
     """
     ncm_limpo = ncm.strip()
 
     if not ncm_limpo:
-        return "INCONSISTÊNCIA", "NCM ausente"
+        return "INCONSISTENCIA", "NCM ausente"
     if not ncm_limpo.isdigit():
-        return "INCONSISTÊNCIA", f"NCM inválido: '{ncm_limpo}'"
+        return "INCONSISTENCIA", "NCM invalido: '{}'".format(ncm_limpo)
 
-    # Busca exata (8 dígitos) ou por prefixo (4–7 dígitos)
     for tamanho in (8, 6, 4):
         chave = ncm_limpo[:tamanho].ljust(8, "0")
         if chave in tabela:
-            return "MONOFÁSICO", tabela[chave]
+            return "MONOFASICO", tabela[chave]
 
-    return "NÃO MONOFÁSICO", "NCM fora da tabela"
+    return "NAO MONOFASICO", "NCM fora da tabela"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -187,23 +201,15 @@ def classificar_item(ncm: str, tabela: dict[str, str]) -> tuple[str, str]:
 # ─────────────────────────────────────────────────────────────
 ALIQUOTA_RECUPERACAO = 0.0925  # 9,25% (PIS 1,65% + COFINS 7,60%)
 
-def calcular_resumo(itens_classificados: list[dict]) -> dict:
-    """
-    Recebe lista de itens já classificados e retorna dicionário
-    com totais e estimativa de recuperação tributária.
-    """
-    total_geral       = sum(i["valor"] for i in itens_classificados)
-    total_monofasico  = sum(i["valor"] for i in itens_classificados
-                           if i["classificacao"] == "MONOFÁSICO")
-    total_nao_mono    = sum(i["valor"] for i in itens_classificados
-                           if i["classificacao"] == "NÃO MONOFÁSICO")
-    total_inconsist   = sum(i["valor"] for i in itens_classificados
-                           if i["classificacao"] == "INCONSISTÊNCIA")
-    estimativa_recup  = total_monofasico * ALIQUOTA_RECUPERACAO
-
+def calcular_resumo(itens_classificados, aliquota=ALIQUOTA_RECUPERACAO):
+    total_geral      = sum(i["valor"] for i in itens_classificados)
+    total_mono       = sum(i["valor"] for i in itens_classificados if i["classificacao"] == "MONOFASICO")
+    total_nao_mono   = sum(i["valor"] for i in itens_classificados if i["classificacao"] == "NAO MONOFASICO")
+    total_inconsist  = sum(i["valor"] for i in itens_classificados if i["classificacao"] == "INCONSISTENCIA")
+    estimativa_recup = total_mono * aliquota
     return {
         "total_geral":      total_geral,
-        "total_monofasico": total_monofasico,
+        "total_monofasico": total_mono,
         "total_nao_mono":   total_nao_mono,
         "total_inconsist":  total_inconsist,
         "estimativa_recup": estimativa_recup,
@@ -211,105 +217,99 @@ def calcular_resumo(itens_classificados: list[dict]) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
-#  5. PIPELINE COMPLETO – processa lista de arquivos
+#  5. PIPELINE COMPLETO
 # ─────────────────────────────────────────────────────────────
-def processar_xmls(arquivos: list[tuple[str, bytes]],
-                   tabela: dict[str, str]) -> tuple[list[dict], dict]:
+def processar_xmls(arquivos, tabela, aliquota=ALIQUOTA_RECUPERACAO):
     """
-    Recebe [(nome_arquivo, bytes_xml), ...] e a tabela NCM.
-    Retorna (lista_itens_classificados, resumo).
+    arquivos: lista de (nome_arquivo, bytes_xml)
+    Retorna (lista_itens_classificados, resumo)
     """
     todos_itens = []
-
-    for nome_arquivo, conteudo in arquivos:
+    for nome, conteudo in arquivos:
         try:
             itens = ler_xml_nfe(conteudo)
         except ValueError as e:
-            st.warning(f"⚠️ Erro ao ler '{nome_arquivo}': {e}")
+            st.warning("Erro ao ler '{}': {}".format(nome, e))
             continue
 
         for item in itens:
-            classificacao, motivo = classificar_item(item["ncm"], tabela)
+            classif, motivo = classificar_item(item["ncm"], tabela)
             todos_itens.append({
-                "arquivo":       nome_arquivo,
+                "arquivo":       nome,
                 "descricao":     item["descricao"],
                 "ncm":           item["ncm_raw"],
                 "valor":         item["valor"],
-                "classificacao": classificacao,
+                "classificacao": classif,
                 "motivo":        motivo,
             })
 
-    resumo = calcular_resumo(todos_itens)
+    resumo = calcular_resumo(todos_itens, aliquota)
     return todos_itens, resumo
 
 
 # ─────────────────────────────────────────────────────────────
 #  6. EXPORTAÇÃO EXCEL
 # ─────────────────────────────────────────────────────────────
-def gerar_excel(itens: list[dict], resumo: dict) -> bytes:
-    """Gera um arquivo Excel com duas abas: Itens e Resumo."""
+def gerar_excel(itens, resumo):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df_itens = pd.DataFrame(itens)
-        df_itens.columns = ["Arquivo", "Descrição", "NCM",
-                            "Valor (R$)", "Classificação", "Motivo"]
+        df_itens.columns = ["Arquivo", "Descricao", "NCM", "Valor (R$)", "Classificacao", "Motivo"]
         df_itens.to_excel(writer, sheet_name="Itens", index=False)
 
         df_resumo = pd.DataFrame([{
-            "Faturamento Total (R$)":         resumo["total_geral"],
-            "Faturamento Monofásico (R$)":    resumo["total_monofasico"],
-            "Faturamento Não Monofásico (R$)":resumo["total_nao_mono"],
-            "Itens c/ Inconsistência (R$)":   resumo["total_inconsist"],
-            "Estimativa de Recuperação (R$)": resumo["estimativa_recup"],
+            "Faturamento Total (R$)":          resumo["total_geral"],
+            "Faturamento Monofasico (R$)":     resumo["total_monofasico"],
+            "Faturamento Nao Monofasico (R$)": resumo["total_nao_mono"],
+            "Itens c/ Inconsistencia (R$)":    resumo["total_inconsist"],
+            "Estimativa de Recuperacao (R$)":  resumo["estimativa_recup"],
         }])
         df_resumo.to_excel(writer, sheet_name="Resumo", index=False)
-
     return output.getvalue()
 
 
 # ─────────────────────────────────────────────────────────────
 #  7. INTERFACE STREAMLIT
 # ─────────────────────────────────────────────────────────────
-def formatar_brl(valor: float) -> str:
-    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+def formatar_brl(valor):
+    return "R$ {:,.2f}".format(valor).replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def main():
     st.set_page_config(
-        page_title="Analisador PIS/COFINS Monofásico",
+        page_title="Analisador PIS/COFINS Monofasico",
         page_icon="📊",
         layout="wide",
     )
 
-    # ── Cabeçalho ────────────────────────────────────────────
-    st.title("📊 Analisador PIS/COFINS Monofásico")
+    st.title("📊 Analisador PIS/COFINS Monofasico")
     st.caption(
         "Simples Nacional · Regime de Revenda · "
-        "Classificação automática por NCM (Tabela 4.3.10 EFD-Contribuições)"
+        "Classificacao automatica por NCM (Tabela 4.3.10 EFD-Contribuicoes)"
     )
     st.divider()
 
-    # ── Sidebar – configurações ───────────────────────────────
+    # ── Sidebar ───────────────────────────────────────────────
     with st.sidebar:
-        st.header("⚙️ Configurações")
+        st.header("Configuracoes")
         aliquota = st.number_input(
-            "Alíquota de recuperação (%)",
+            "Aliquota de recuperacao (%)",
             min_value=0.0, max_value=100.0,
-            value=ALIQUOTA_RECUPERACAO * 100,
-            step=0.05, format="%.2f",
-            help="Padrão: 9,25% (PIS 1,65% + COFINS 7,60%)"
+            value=9.25, step=0.05, format="%.2f",
+            help="Padrao: 9,25% (PIS 1,65% + COFINS 7,60%)"
         )
         aliquota_decimal = aliquota / 100
-
         st.markdown("---")
         st.markdown(
             "**Tabela NCM carregada:**  \n"
-            f"`{len(TABELA_NCM_MONOFASICO)}` NCMs monofásicos  \n"
-            "_Edite `TABELA_NCM_MONOFASICO` no código para atualizar._"
+            "`{}` NCMs monofasicos  \n"
+            "_Edite `TABELA_NCM_MONOFASICO` no codigo para atualizar._".format(
+                len(TABELA_NCM_MONOFASICO)
+            )
         )
 
     # ── Upload ────────────────────────────────────────────────
-    st.subheader("1️⃣  Upload dos XMLs de NF-e")
+    st.subheader("1  Upload dos XMLs de NF-e")
     uploaded = st.file_uploader(
         "Selecione um ou mais arquivos XML",
         type=["xml"],
@@ -317,114 +317,83 @@ def main():
     )
 
     if not uploaded:
-        st.info("📂 Aguardando o upload dos arquivos XML de NF-e…")
+        st.info("Aguardando o upload dos arquivos XML de NF-e...")
         st.stop()
 
-    # ── Processamento ─────────────────────────────────────────
     arquivos = [(f.name, f.read()) for f in uploaded]
 
-    with st.spinner("Processando XMLs…"):
-        itens, resumo = processar_xmls(arquivos, TABELA_NCM_MONOFASICO)
-        # Recalcula com alíquota customizada
-        resumo["estimativa_recup"] = resumo["total_monofasico"] * aliquota_decimal
+    with st.spinner("Processando XMLs..."):
+        itens, resumo = processar_xmls(arquivos, TABELA_NCM_MONOFASICO, aliquota_decimal)
 
     if not itens:
-        st.error("Nenhum item pôde ser extraído dos arquivos enviados.")
+        st.error("Nenhum item pode ser extraido dos arquivos enviados.")
         st.stop()
 
     df = pd.DataFrame(itens)
 
-    # ── Resumo executivo ──────────────────────────────────────
-    st.subheader("2️⃣  Resumo Executivo")
+    # ── Métricas ──────────────────────────────────────────────
+    st.subheader("2  Resumo Executivo")
     col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Faturamento Total",         formatar_brl(resumo["total_geral"]))
+    col2.metric("Faturamento Monofasico",    formatar_brl(resumo["total_monofasico"]))
+    col3.metric("Faturamento Nao Monofasico",formatar_brl(resumo["total_nao_mono"]))
+    col4.metric(
+        "Estimativa de Recuperacao ({:.2f}%)".format(aliquota),
+        formatar_brl(resumo["estimativa_recup"])
+    )
 
-    col1.metric("💰 Faturamento Total",
-                formatar_brl(resumo["total_geral"]))
-    col2.metric("🔵 Faturamento Monofásico",
-                formatar_brl(resumo["total_monofasico"]))
-    col3.metric("⚪ Faturamento Não Monofásico",
-                formatar_brl(resumo["total_nao_mono"]))
-    col4.metric(f"✅ Estimativa de Recuperação ({aliquota:.2f}%)",
-                formatar_brl(resumo["estimativa_recup"]))
-
-    # ── Gráfico de composição ─────────────────────────────────
-    st.subheader("3️⃣  Composição do Faturamento")
-    graf_data = {
-        "Monofásico":     resumo["total_monofasico"],
-        "Não Monofásico": resumo["total_nao_mono"],
-    }
+    # ── Gráfico ───────────────────────────────────────────────
+    st.subheader("3  Composicao do Faturamento")
+    graf = {"Monofasico": resumo["total_monofasico"], "Nao Monofasico": resumo["total_nao_mono"]}
     if resumo["total_inconsist"] > 0:
-        graf_data["Inconsistências"] = resumo["total_inconsist"]
-
-    st.bar_chart(pd.DataFrame.from_dict(
-        graf_data, orient="index", columns=["Valor (R$)"]
-    ))
+        graf["Inconsistencias"] = resumo["total_inconsist"]
+    st.bar_chart(pd.DataFrame.from_dict(graf, orient="index", columns=["Valor (R$)"]))
 
     # ── Inconsistências ───────────────────────────────────────
-    inconsistencias = df[df["classificacao"] == "INCONSISTÊNCIA"]
-    if not inconsistencias.empty:
-        st.subheader("⚠️  Inconsistências Encontradas")
-        st.warning(
-            f"{len(inconsistencias)} item(ns) com NCM ausente ou inválido. "
-            "Verifique esses produtos manualmente."
-        )
+    inconsist = df[df["classificacao"] == "INCONSISTENCIA"]
+    if not inconsist.empty:
+        st.subheader("Inconsistencias Encontradas")
+        st.warning("{} item(ns) com NCM ausente ou invalido. Verifique manualmente.".format(len(inconsist)))
         st.dataframe(
-            inconsistencias[["arquivo", "descricao", "ncm", "valor", "motivo"]]
-            .rename(columns={
-                "arquivo": "Arquivo", "descricao": "Descrição",
-                "ncm": "NCM", "valor": "Valor (R$)", "motivo": "Motivo",
+            inconsist[["arquivo", "descricao", "ncm", "valor", "motivo"]].rename(columns={
+                "arquivo": "Arquivo", "descricao": "Descricao",
+                "ncm": "NCM", "valor": "Valor (R$)", "motivo": "Motivo"
             }),
             use_container_width=True,
         )
 
-    # ── Tabela de itens classificados ─────────────────────────
-    st.subheader("4️⃣  Itens Classificados")
-
-    # Filtro interativo
+    # ── Tabela de itens ───────────────────────────────────────
+    st.subheader("4  Itens Classificados")
     filtro = st.selectbox(
-        "Filtrar por classificação",
-        ["Todos", "MONOFÁSICO", "NÃO MONOFÁSICO", "INCONSISTÊNCIA"],
+        "Filtrar por classificacao",
+        ["Todos", "MONOFASICO", "NAO MONOFASICO", "INCONSISTENCIA"],
     )
-    df_exibir = df if filtro == "Todos" else df[df["classificacao"] == filtro]
-
-    def colorir(val):
-        cores = {
-            "MONOFÁSICO":    "background-color: #d4edda; color: #155724",
-            "NÃO MONOFÁSICO":"background-color: #f8f9fa; color: #343a40",
-            "INCONSISTÊNCIA":"background-color: #fff3cd; color: #856404",
-        }
-        return cores.get(val, "")
+    df_exib = df if filtro == "Todos" else df[df["classificacao"] == filtro]
 
     st.dataframe(
-        df_exibir[["arquivo", "descricao", "ncm",
-                   "valor", "classificacao", "motivo"]]
-        .rename(columns={
-            "arquivo": "Arquivo", "descricao": "Descrição", "ncm": "NCM",
-            "valor": "Valor (R$)", "classificacao": "Classificação",
-            "motivo": "Motivo / Categoria",
-        })
-        .style.applymap(colorir, subset=["Classificação"]),
+        df_exib[["arquivo", "descricao", "ncm", "valor", "classificacao", "motivo"]].rename(columns={
+            "arquivo": "Arquivo", "descricao": "Descricao", "ncm": "NCM",
+            "valor": "Valor (R$)", "classificacao": "Classificacao", "motivo": "Motivo"
+        }),
         use_container_width=True,
         height=420,
     )
 
-    # ── Exportar Excel ────────────────────────────────────────
-    st.subheader("5️⃣  Exportar Relatório")
+    # ── Export ────────────────────────────────────────────────
+    st.subheader("5  Exportar Relatorio")
     excel_bytes = gerar_excel(itens, resumo)
     st.download_button(
-        label="⬇️  Baixar relatório Excel",
+        label="Baixar relatorio Excel",
         data=excel_bytes,
         file_name="relatorio_pis_cofins_monofasico.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-    # ── Nota legal ────────────────────────────────────────────
     st.divider()
     st.caption(
-        "⚖️ **Aviso:** Este sistema é um MVP para fins de análise preliminar. "
-        "A classificação de produtos como monofásicos deve ser validada por "
-        "contador ou consultor tributário habilitado. "
-        "Os valores de recuperação são estimativas baseadas na legislação vigente."
+        "Aviso: Este sistema e um MVP para fins de analise preliminar. "
+        "A classificacao de produtos como monofasicos deve ser validada por "
+        "contador ou consultor tributario habilitado."
     )
 
 
