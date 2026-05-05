@@ -110,13 +110,7 @@ TABELA_NCM_MONOFASICO: dict[str, str] = {
 # ─────────────────────────────────────────────────────────────
 #  2. LEITURA DE XML – NF-e
 # ─────────────────────────────────────────────────────────────
-def ler_xml_nfe(conteudo: bytes) -> list[dict]:
-    """
-    Recebe os bytes de um arquivo XML de NF-e e retorna
-    uma lista de dicionários, um por item da nota.
-    """
-    try:
-        root = ET.fromstring(conteudo)
+.fromstring(conteudo)
     except ET.ParseError as e:
         raise ValueError(f"XML inválido: {e}")
 
