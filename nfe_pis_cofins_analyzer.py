@@ -1,7 +1,8 @@
 """
 =============================================================
-  ANALISADOR PIS/COFINS MONOFASICO + APURACAO PGDAS-D
-  Simples Nacional · Regime de Revenda · CST 04  |  MVP v3
+  ANALISADOR PIS/COFINS MONOFASICO + APURACAO PGDAS-D v4
+  Simples Nacional · Regime de Revenda · CST 04
+  RBT12 dinamico · Faixa por mes · Credito real PIS/COFINS
 =============================================================
 Dependencias:
     pip install streamlit pandas openpyxl
@@ -14,12 +15,11 @@ Execucao:
 import streamlit as st
 import pandas as pd
 import xml.etree.ElementTree as ET
-from io import BytesIO, StringIO
+from io import BytesIO
 from datetime import datetime
 
 # ─────────────────────────────────────────────────────────────
-#  1. TABELA DE NCM MONOFASICOS
-#     Baseada na Tabela 4.3.10 da EFD-Contribuicoes (SPED)
+#  1. TABELA DE NCM MONOFASICOS (Tabela 4.3.10 EFD-Contribuicoes)
 #     Edite este dicionario para adicionar/remover NCMs
 # ─────────────────────────────────────────────────────────────
 TABELA_NCM_MONOFASICO = {
@@ -30,7 +30,7 @@ TABELA_NCM_MONOFASICO = {
     "27101500": "Oleos lubrificantes",
     "27111100": "Gas natural liquefeito (GNL)",
     "27111910": "Gas liquefeito de petroleo (GLP)",
-    "30011000": "Glandulas e outros orgaos para usos opoterapicos",
+    "30011000": "Glandulas e orgaos para usos opoterapicos",
     "30021000": "Antissoros e imunoglobulinas",
     "30022000": "Vacinas para medicina humana",
     "30023000": "Vacinas para medicina veterinaria",
@@ -95,58 +95,119 @@ TABELA_NCM_MONOFASICO = {
 }
 
 # ─────────────────────────────────────────────────────────────
-#  2. TABELAS DO SIMPLES NACIONAL
-#     Fonte: LC 123/2006 – Resolucao CGSN 140/2018
-#     Estrutura: (limite_superior, aliq_nominal, parcela_deduzir)
+#  2. TABELAS DO SIMPLES NACIONAL – LC 123/2006
+#     Cada faixa: {faixa, limite, aliquota, deducao}
 # ─────────────────────────────────────────────────────────────
+
+ANEXO_I = [
+    {"faixa": 1, "limite": 180_000,     "aliquota": 0.04,  "deducao": 0.0},
+    {"faixa": 2, "limite": 360_000,     "aliquota": 0.073, "deducao": 5_940.0},
+    {"faixa": 3, "limite": 720_000,     "aliquota": 0.095, "deducao": 13_860.0},
+    {"faixa": 4, "limite": 1_800_000,   "aliquota": 0.107, "deducao": 22_500.0},
+    {"faixa": 5, "limite": 3_600_000,   "aliquota": 0.143, "deducao": 87_300.0},
+    {"faixa": 6, "limite": 4_800_000,   "aliquota": 0.19,  "deducao": 378_000.0},
+]
+
+ANEXO_II = [
+    {"faixa": 1, "limite": 180_000,     "aliquota": 0.045, "deducao": 0.0},
+    {"faixa": 2, "limite": 360_000,     "aliquota": 0.078, "deducao": 5_940.0},
+    {"faixa": 3, "limite": 720_000,     "aliquota": 0.10,  "deducao": 13_860.0},
+    {"faixa": 4, "limite": 1_800_000,   "aliquota": 0.113, "deducao": 22_500.0},
+    {"faixa": 5, "limite": 3_600_000,   "aliquota": 0.147, "deducao": 85_500.0},
+    {"faixa": 6, "limite": 4_800_000,   "aliquota": 0.30,  "deducao": 720_000.0},
+]
+
+ANEXO_III = [
+    {"faixa": 1, "limite": 180_000,     "aliquota": 0.06,  "deducao": 0.0},
+    {"faixa": 2, "limite": 360_000,     "aliquota": 0.112, "deducao": 9_360.0},
+    {"faixa": 3, "limite": 720_000,     "aliquota": 0.135, "deducao": 17_640.0},
+    {"faixa": 4, "limite": 1_800_000,   "aliquota": 0.16,  "deducao": 35_640.0},
+    {"faixa": 5, "limite": 3_600_000,   "aliquota": 0.21,  "deducao": 125_640.0},
+    {"faixa": 6, "limite": 4_800_000,   "aliquota": 0.33,  "deducao": 648_000.0},
+]
+
+ANEXO_IV = [
+    {"faixa": 1, "limite": 180_000,     "aliquota": 0.045, "deducao": 0.0},
+    {"faixa": 2, "limite": 360_000,     "aliquota": 0.09,  "deducao": 8_100.0},
+    {"faixa": 3, "limite": 720_000,     "aliquota": 0.102, "deducao": 12_420.0},
+    {"faixa": 4, "limite": 1_800_000,   "aliquota": 0.14,  "deducao": 39_780.0},
+    {"faixa": 5, "limite": 3_600_000,   "aliquota": 0.22,  "deducao": 183_780.0},
+    {"faixa": 6, "limite": 4_800_000,   "aliquota": 0.33,  "deducao": 828_000.0},
+]
+
+ANEXO_V = [
+    {"faixa": 1, "limite": 180_000,     "aliquota": 0.15,  "deducao": 0.0},
+    {"faixa": 2, "limite": 360_000,     "aliquota": 0.18,  "deducao": 5_400.0},
+    {"faixa": 3, "limite": 720_000,     "aliquota": 0.195, "deducao": 13_500.0},
+    {"faixa": 4, "limite": 1_800_000,   "aliquota": 0.205, "deducao": 20_700.0},
+    {"faixa": 5, "limite": 3_600_000,   "aliquota": 0.23,  "deducao": 62_100.0},
+    {"faixa": 6, "limite": 4_800_000,   "aliquota": 0.305, "deducao": 540_000.0},
+]
+
 TABELAS_SIMPLES = {
-    "Anexo I – Comercio": [
-        (180_000,       0.04,   0.0),
-        (360_000,       0.073,  5_940.0),
-        (720_000,       0.095,  13_860.0),
-        (1_800_000,     0.107,  22_500.0),
-        (3_600_000,     0.143,  87_300.0),
-        (4_800_000,     0.19,   378_000.0),
-    ],
-    "Anexo II – Industria": [
-        (180_000,       0.045,  0.0),
-        (360_000,       0.078,  5_940.0),
-        (720_000,       0.10,   13_860.0),
-        (1_800_000,     0.113,  22_500.0),
-        (3_600_000,     0.147,  85_500.0),
-        (4_800_000,     0.30,   720_000.0),
-    ],
-    "Anexo III – Servicos A": [
-        (180_000,       0.06,   0.0),
-        (360_000,       0.112,  9_360.0),
-        (720_000,       0.135,  17_640.0),
-        (1_800_000,     0.16,   35_640.0),
-        (3_600_000,     0.21,   125_640.0),
-        (4_800_000,     0.33,   648_000.0),
-    ],
-    "Anexo IV – Servicos B": [
-        (180_000,       0.045,  0.0),
-        (360_000,       0.09,   8_100.0),
-        (720_000,       0.102,  12_420.0),
-        (1_800_000,     0.14,   39_780.0),
-        (3_600_000,     0.22,   183_780.0),
-        (4_800_000,     0.33,   828_000.0),
-    ],
-    "Anexo V – Servicos C": [
-        (180_000,       0.15,   0.0),
-        (360_000,       0.18,   5_400.0),
-        (720_000,       0.195,  13_500.0),
-        (1_800_000,     0.205,  20_700.0),
-        (3_600_000,     0.23,   62_100.0),
-        (4_800_000,     0.305,  540_000.0),
-    ],
+    "Anexo I – Comercio":     ANEXO_I,
+    "Anexo II – Industria":   ANEXO_II,
+    "Anexo III – Servicos A": ANEXO_III,
+    "Anexo IV – Servicos B":  ANEXO_IV,
+    "Anexo V – Servicos C":   ANEXO_V,
 }
 
-ALIQUOTA_PIS_COFINS = 0.0925  # 9,25% – estimativa PIS + COFINS monofasico
+# ─────────────────────────────────────────────────────────────
+#  3. TABELA DE REPARTICAO DO DAS – LC 123/2006
+#     Percentuais de PIS e COFINS sobre a aliquota efetiva
+#     por faixa e por anexo.
+#     Faixa 1 do Anexo I: PIS/COFINS = 0 (isencao na 1a faixa)
+#     Demais faixas: conforme resolucao CGSN 140/2018
+# ─────────────────────────────────────────────────────────────
+
+REPARTICAO = {
+    "Anexo I – Comercio": {
+        1: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0,    "pis": 0.0,    "cpp": 0.0,    "icms": 1.0},
+        2: {"cpf": 0.0, "csll": 0.0, "cofins": 0.1274, "pis": 0.0276, "cpp": 0.4368, "icms": 0.4082},
+        3: {"cpf": 0.0, "csll": 0.0, "cofins": 0.1274, "pis": 0.0276, "cpp": 0.4368, "icms": 0.4082},
+        4: {"cpf": 0.0, "csll": 0.0, "cofins": 0.1274, "pis": 0.0276, "cpp": 0.4368, "icms": 0.4082},
+        5: {"cpf": 0.0, "csll": 0.0, "cofins": 0.1274, "pis": 0.0276, "cpp": 0.4368, "icms": 0.4082},
+        6: {"cpf": 0.0, "csll": 0.0, "cofins": 0.1274, "pis": 0.0276, "cpp": 0.4368, "icms": 0.4082},
+    },
+    "Anexo II – Industria": {
+        1: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0,    "pis": 0.0,    "cpp": 0.0,    "icms": 0.0,   "ipi": 1.0},
+        2: {"cpf": 0.0, "csll": 0.0, "cofins": 0.086,  "pis": 0.0186, "cpp": 0.4054, "icms": 0.3768, "ipi": 0.1132},
+        3: {"cpf": 0.0, "csll": 0.0, "cofins": 0.086,  "pis": 0.0186, "cpp": 0.4054, "icms": 0.3768, "ipi": 0.1132},
+        4: {"cpf": 0.0, "csll": 0.0, "cofins": 0.086,  "pis": 0.0186, "cpp": 0.4054, "icms": 0.3768, "ipi": 0.1132},
+        5: {"cpf": 0.0, "csll": 0.0, "cofins": 0.086,  "pis": 0.0186, "cpp": 0.4054, "icms": 0.3768, "ipi": 0.1132},
+        6: {"cpf": 0.0, "csll": 0.0, "cofins": 0.086,  "pis": 0.0186, "cpp": 0.4054, "icms": 0.3768, "ipi": 0.1132},
+    },
+    "Anexo III – Servicos A": {
+        1: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0,    "pis": 0.0,    "cpp": 0.0,    "iss": 1.0},
+        2: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0773, "pis": 0.0167, "cpp": 0.2816, "iss": 0.3333, "irpj": 0.04, "csll2": 0.0411},
+        3: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0773, "pis": 0.0167, "cpp": 0.2816, "iss": 0.3333, "irpj": 0.04, "csll2": 0.0411},
+        4: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0773, "pis": 0.0167, "cpp": 0.2816, "iss": 0.3333, "irpj": 0.04, "csll2": 0.0411},
+        5: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0773, "pis": 0.0167, "cpp": 0.2816, "iss": 0.3333, "irpj": 0.04, "csll2": 0.0411},
+        6: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0773, "pis": 0.0167, "cpp": 0.2816, "iss": 0.3333, "irpj": 0.04, "csll2": 0.0411},
+    },
+    "Anexo IV – Servicos B": {
+        1: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0,    "pis": 0.0,    "iss": 1.0},
+        2: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0773, "pis": 0.0167, "iss": 0.4444, "irpj": 0.18, "csll2": 0.1516},
+        3: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0773, "pis": 0.0167, "iss": 0.4444, "irpj": 0.18, "csll2": 0.1516},
+        4: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0773, "pis": 0.0167, "iss": 0.4444, "irpj": 0.18, "csll2": 0.1516},
+        5: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0773, "pis": 0.0167, "iss": 0.4444, "irpj": 0.18, "csll2": 0.1516},
+        6: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0773, "pis": 0.0167, "iss": 0.4444, "irpj": 0.18, "csll2": 0.1516},
+    },
+    "Anexo V – Servicos C": {
+        1: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0,    "pis": 0.0,    "iss": 1.0},
+        2: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0454, "pis": 0.0098, "iss": 0.2,   "irpj": 0.2718, "csll2": 0.073, "cpp": 0.4},
+        3: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0454, "pis": 0.0098, "iss": 0.2,   "irpj": 0.2718, "csll2": 0.073, "cpp": 0.4},
+        4: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0454, "pis": 0.0098, "iss": 0.2,   "irpj": 0.2718, "csll2": 0.073, "cpp": 0.4},
+        5: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0454, "pis": 0.0098, "iss": 0.2,   "irpj": 0.2718, "csll2": 0.073, "cpp": 0.4},
+        6: {"cpf": 0.0, "csll": 0.0, "cofins": 0.0454, "pis": 0.0098, "iss": 0.2,   "irpj": 0.2718, "csll2": 0.073, "cpp": 0.4},
+    },
+}
+
+ALIQUOTA_PIS_COFINS_ESTIMATIVA = 0.0925
 
 
 # ─────────────────────────────────────────────────────────────
-#  3. LEITURA DE XML – NF-e (robusto: ignora namespace)
+#  4. HELPERS XML
 # ─────────────────────────────────────────────────────────────
 def local_tag(node):
     t = node.tag
@@ -164,73 +225,63 @@ def text_local(el, tag, default=""):
 
 
 def extrair_data(root):
-    """
-    Extrai dhEmi do XML e retorna string 'YYYY-MM'.
-    Fallback para dEmi (NF-e mais antigas).
-    Retorna 'SEM-DATA' se nao encontrar.
-    """
+    """Extrai dhEmi/dEmi do XML e retorna 'YYYY-MM'."""
     dh = text_local(root, "dhEmi") or text_local(root, "dEmi")
     if not dh:
         return "SEM-DATA"
-    # dhEmi pode vir como "2024-03-15T10:30:00-03:00" ou "2024-03-15"
     try:
-        return dh[:7]  # "YYYY-MM"
+        return dh[:7]
     except Exception:
         return "SEM-DATA"
 
 
 def ler_xml_nfe(conteudo):
     """
-    Recebe bytes de um XML de NF-e.
-    Retorna (lista_de_itens, mes_ano_str).
-    Cada item: {descricao, ncm_raw, ncm, valor}
+    Le bytes de NF-e XML.
+    Retorna (lista_itens, mes_ano_str).
+    Robusto: ignora namespace, remove BOM.
     """
     if isinstance(conteudo, bytes):
         conteudo = conteudo.lstrip(b"\xef\xbb\xbf").strip()
-
     try:
         root = ET.fromstring(conteudo)
     except ET.ParseError as e:
-        raise ValueError("Erro ao interpretar XML: {}".format(e))
+        raise ValueError("XML invalido: {}".format(e))
 
     mes_ano = extrair_data(root)
-
     dets = [n for n in root.iter() if local_tag(n) == "det"]
     itens = []
+
     for det in dets:
         prod = find_local(det, "prod")
         if prod is None:
             continue
-
         descricao = text_local(prod, "xProd")
         ncm_raw   = text_local(prod, "NCM")
         vprod_str = text_local(prod, "vProd")
         ncm       = ncm_raw.replace(".", "").replace("-", "").strip()
-
         try:
             valor = float(vprod_str.replace(",", "."))
         except ValueError:
             valor = 0.0
-
         itens.append({
             "descricao": descricao or "(sem descricao)",
             "ncm_raw":   ncm_raw,
             "ncm":       ncm,
             "valor":     valor,
         })
-
     return itens, mes_ano
 
 
 # ─────────────────────────────────────────────────────────────
-#  4. CLASSIFICACAO POR TABELA NCM
+#  5. CLASSIFICACAO NCM
 # ─────────────────────────────────────────────────────────────
 def classificar_item(ncm, tabela):
     """
     Retorna (classificacao, motivo).
-    Busca por 8, 6 ou 4 digitos.
+    Busca por 8, 6 ou 4 digitos iniciais.
     """
-    ncm_limpo = ncm.strip()
+    ncm_limpo = str(ncm).strip()
     if not ncm_limpo:
         return "INCONSISTENCIA", "NCM ausente"
     if not ncm_limpo.isdigit():
@@ -243,12 +294,12 @@ def classificar_item(ncm, tabela):
 
 
 # ─────────────────────────────────────────────────────────────
-#  5. AGRUPAMENTO MENSAL
+#  6. AGRUPAMENTO MENSAL
 # ─────────────────────────────────────────────────────────────
 def agrupar_por_mes(itens_classificados):
     """
-    Agrupa lista de itens classificados por mes.
-    Retorna lista de dicts:
+    Agrupa itens classificados por mes (YYYY-MM).
+    Retorna lista ordenada cronologicamente de dicts:
       {mes, receita_total, receita_monofasica, receita_tributavel}
     """
     meses = {}
@@ -261,84 +312,183 @@ def agrupar_por_mes(itens_classificados):
             meses[m]["receita_monofasica"] += item["valor"]
 
     resultado = []
-    for mes in sorted(meses.keys()):
-        total = meses[mes]["receita_total"]
-        mono  = meses[mes]["receita_monofasica"]
+    # Ordena: meses validos cronologicamente, SEM-DATA no final
+    chaves_validas  = sorted([k for k in meses if k != "SEM-DATA"])
+    chaves_invalidas = [k for k in meses if k == "SEM-DATA"]
+
+    for m in chaves_validas + chaves_invalidas:
+        total = meses[m]["receita_total"]
+        mono  = meses[m]["receita_monofasica"]
         resultado.append({
-            "mes":               mes,
-            "receita_total":     total,
-            "receita_monofasica":mono,
-            "receita_tributavel":total - mono,
+            "mes":                m,
+            "receita_total":      total,
+            "receita_monofasica": mono,
+            "receita_tributavel": total - mono,
         })
     return resultado
 
 
 # ─────────────────────────────────────────────────────────────
-#  6. CALCULO DA ALIQUOTA EFETIVA (PGDAS-D)
+#  7. RBT12 DINAMICO
 # ─────────────────────────────────────────────────────────────
-def calcular_aliquota_efetiva(rbt12, anexo):
+def calcular_rbt12(agrupamento_mensal, rbt12_inicial=0.0):
     """
-    Calcula a aliquota efetiva do Simples Nacional.
-    Formula: (RBT12 * aliq_nominal - parcela_deduzir) / RBT12
-    Retorna (aliquota_efetiva, aliquota_nominal, parcela_deduzir, faixa_idx)
+    Calcula o RBT12 rolling para cada mes.
+
+    Logica:
+      - Para o primeiro mes: usa rbt12_inicial (informado pelo usuario)
+        como proxy dos 12 meses anteriores ao periodo dos XMLs.
+      - Para meses subsequentes: desloca a janela somando o mes atual
+        e subtraindo o mais antigo (quando ha 12+ meses disponíveis).
+
+    Retorna dict {mes: rbt12}.
+
+    Nota: para calculo rigoroso do PGDAS-D o ideal e ter o historico
+    completo de 12 meses. O rbt12_inicial supre a ausencia desse historico.
     """
-    faixas = TABELAS_SIMPLES.get(anexo, [])
-    if not faixas:
-        return 0.0, 0.0, 0.0, -1
+    meses = [r["mes"] for r in agrupamento_mensal]
+    receitas = {r["mes"]: r["receita_total"] for r in agrupamento_mensal}
 
-    if rbt12 <= 0:
-        return 0.0, 0.0, 0.0, 0
+    # Janela deslizante de ate 12 meses
+    resultado = {}
+    historico = []  # lista de (mes, receita) dos ultimos 12
 
-    for idx, (limite, aliq_nom, parcela) in enumerate(faixas):
-        if rbt12 <= limite:
-            efetiva = (rbt12 * aliq_nom - parcela) / rbt12
-            return round(efetiva, 6), aliq_nom, parcela, idx + 1
+    # Inicializa com rbt12_inicial como "bloco" representando os 12 meses anteriores
+    saldo = rbt12_inicial
 
-    # Acima do limite maximo do Simples
-    return None, None, None, -1
+    for mes in meses:
+        # RBT12 deste mes = soma dos 12 meses ANTERIORES a ele
+        resultado[mes] = round(saldo, 2)
 
+        # Adiciona este mes ao historico e atualiza saldo
+        historico.append((mes, receitas[mes]))
+        saldo += receitas[mes]
 
-# ─────────────────────────────────────────────────────────────
-#  7. CALCULO DO DAS
-# ─────────────────────────────────────────────────────────────
-def calcular_das(agrupamento_mensal, aliquota_efetiva):
-    """
-    Para cada mes calcula:
-      DAS pago    = receita_total * aliquota_efetiva
-      DAS correto = receita_tributavel * aliquota_efetiva
-    Retorna lista de dicts com colunas de DAS.
-    """
-    resultado = []
-    for row in agrupamento_mensal:
-        das_pago    = row["receita_total"]     * aliquota_efetiva
-        das_correto = row["receita_tributavel"] * aliquota_efetiva
-        resultado.append({**row, "das_pago": das_pago, "das_correto": das_correto})
+        # Se historico > 12 meses, remove o mais antigo
+        if len(historico) > 12:
+            _, rec_antiga = historico.pop(0)
+            saldo -= rec_antiga
+
     return resultado
 
 
 # ─────────────────────────────────────────────────────────────
-#  8. CALCULO DO CREDITO
+#  8. IDENTIFICACAO DE FAIXA
 # ─────────────────────────────────────────────────────────────
-def calcular_credito(dados_das):
+def identificar_faixa(rbt12, tabela_anexo):
     """
-    Credito_mensal = DAS_pago - DAS_correto
-    Retorna lista com coluna 'credito' e o total acumulado.
+    Recebe o RBT12 e a lista de faixas do anexo.
+    Retorna o dict da faixa correspondente ou None se acima do limite.
     """
+    if rbt12 <= 0:
+        return tabela_anexo[0]  # Faixa 1 como padrao para RBT12 zero
+    for faixa in tabela_anexo:
+        if rbt12 <= faixa["limite"]:
+            return faixa
+    return None  # Acima de R$ 4,8M – fora do Simples
+
+
+# ─────────────────────────────────────────────────────────────
+#  9. CALCULO DA ALIQUOTA EFETIVA (PGDAS-D)
+# ─────────────────────────────────────────────────────────────
+def calcular_aliquota_efetiva(rbt12, faixa):
+    """
+    Formula oficial PGDAS-D:
+      aliquota_efetiva = (RBT12 * aliquota_nominal - deducao) / RBT12
+
+    Retorna float da aliquota efetiva, ou 0.0 se RBT12 = 0.
+    """
+    if rbt12 <= 0:
+        return 0.0
+    return (rbt12 * faixa["aliquota"] - faixa["deducao"]) / rbt12
+
+
+# ─────────────────────────────────────────────────────────────
+#  10. PERCENTUAL PIS/COFINS DA REPARTICAO
+# ─────────────────────────────────────────────────────────────
+def calcular_pct_pis_cofins(faixa_num, nome_anexo):
+    """
+    Retorna o percentual combinado PIS + COFINS para a faixa
+    informada, conforme tabela de reparticao do DAS.
+    """
+    rep = REPARTICAO.get(nome_anexo, {})
+    faixa_rep = rep.get(faixa_num, {})
+    return faixa_rep.get("pis", 0.0) + faixa_rep.get("cofins", 0.0)
+
+
+# ─────────────────────────────────────────────────────────────
+#  11. PIPELINE DE APURACAO MES A MES
+# ─────────────────────────────────────────────────────────────
+def apurar_periodo(agrupamento_mensal, nome_anexo, rbt12_inicial=0.0):
+    """
+    Pipeline completo de apuracao do credito mensal.
+
+    Para cada mes calcula:
+      - RBT12 dinamico
+      - Faixa do Simples
+      - Aliquota efetiva (formula PGDAS-D)
+      - DAS pago (sobre receita total)
+      - DAS correto (sobre receita tributavel)
+      - Credito bruto (diferenca dos DAS)
+      - Percentual PIS+COFINS da reparticao
+      - Credito real PIS/COFINS
+
+    Retorna lista de dicts com todos os campos.
+    """
+    tabela_anexo = TABELAS_SIMPLES[nome_anexo]
+    rbt12_por_mes = calcular_rbt12(agrupamento_mensal, rbt12_inicial)
+
     resultado = []
-    total_credito = 0.0
-    for row in dados_das:
-        credito = row["das_pago"] - row["das_correto"]
-        total_credito += credito
-        resultado.append({**row, "credito": credito})
-    return resultado, total_credito
+    for row in agrupamento_mensal:
+        mes   = row["mes"]
+        rbt12 = rbt12_por_mes.get(mes, 0.0)
+
+        faixa = identificar_faixa(rbt12, tabela_anexo)
+
+        if faixa is None:
+            # RBT12 acima do limite do Simples
+            resultado.append({
+                **row,
+                "rbt12":           rbt12,
+                "faixa":           "ACIMA",
+                "aliquota_efetiva":None,
+                "das_pago":        None,
+                "das_correto":     None,
+                "credito_bruto":   None,
+                "pct_pis_cofins":  None,
+                "credito_real":    None,
+                "alerta":          "RBT12 acima de R$ 4,8M – fora do Simples",
+            })
+            continue
+
+        aliq_ef  = calcular_aliquota_efetiva(rbt12, faixa)
+        das_pago    = row["receita_total"]     * aliq_ef
+        das_correto = row["receita_tributavel"] * aliq_ef
+        cred_bruto  = das_pago - das_correto
+        pct_pc      = calcular_pct_pis_cofins(faixa["faixa"], nome_anexo)
+        cred_real   = cred_bruto * pct_pc
+
+        resultado.append({
+            **row,
+            "rbt12":           rbt12,
+            "faixa":           faixa["faixa"],
+            "aliquota_nominal":faixa["aliquota"],
+            "aliquota_efetiva":aliq_ef,
+            "das_pago":        das_pago,
+            "das_correto":     das_correto,
+            "credito_bruto":   cred_bruto,
+            "pct_pis_cofins":  pct_pc,
+            "credito_real":    cred_real,
+            "alerta":          "",
+        })
+
+    return resultado
 
 
 # ─────────────────────────────────────────────────────────────
-#  9. CALCULO DE RESUMO GERAL (mantido do v2)
+#  12. RESUMO GERAL (mantido)
 # ─────────────────────────────────────────────────────────────
-ALIQUOTA_RECUPERACAO = ALIQUOTA_PIS_COFINS
-
-def calcular_resumo(itens_classificados, aliquota=ALIQUOTA_RECUPERACAO):
+def calcular_resumo(itens_classificados, aliquota=ALIQUOTA_PIS_COFINS_ESTIMATIVA):
     total_geral     = sum(i["valor"] for i in itens_classificados)
     total_mono      = sum(i["valor"] for i in itens_classificados if i["classificacao"] == "MONOFASICO")
     total_nao_mono  = sum(i["valor"] for i in itens_classificados if i["classificacao"] == "NAO MONOFASICO")
@@ -354,9 +504,9 @@ def calcular_resumo(itens_classificados, aliquota=ALIQUOTA_RECUPERACAO):
 
 
 # ─────────────────────────────────────────────────────────────
-#  10. PIPELINE COMPLETO
+#  13. PIPELINE PRINCIPAL
 # ─────────────────────────────────────────────────────────────
-def processar_xmls(arquivos, tabela, aliquota=ALIQUOTA_RECUPERACAO):
+def processar_xmls(arquivos, tabela, aliquota=ALIQUOTA_PIS_COFINS_ESTIMATIVA):
     todos_itens = []
     for nome, conteudo in arquivos:
         try:
@@ -364,7 +514,6 @@ def processar_xmls(arquivos, tabela, aliquota=ALIQUOTA_RECUPERACAO):
         except ValueError as e:
             st.warning("Erro ao ler '{}': {}".format(nome, e))
             continue
-
         for item in itens:
             classif, motivo = classificar_item(item["ncm"], tabela)
             todos_itens.append({
@@ -376,13 +525,12 @@ def processar_xmls(arquivos, tabela, aliquota=ALIQUOTA_RECUPERACAO):
                 "classificacao": classif,
                 "motivo":        motivo,
             })
-
     resumo = calcular_resumo(todos_itens, aliquota)
     return todos_itens, resumo
 
 
 # ─────────────────────────────────────────────────────────────
-#  11. EXPORTACOES
+#  14. EXPORTACOES
 # ─────────────────────────────────────────────────────────────
 def gerar_excel(itens, resumo):
     output = BytesIO()
@@ -391,7 +539,6 @@ def gerar_excel(itens, resumo):
         df_i.columns = ["Arquivo", "Mes", "Descricao", "NCM",
                         "Valor (R$)", "Classificacao", "Motivo"]
         df_i.to_excel(writer, sheet_name="Itens", index=False)
-
         df_r = pd.DataFrame([{
             "Faturamento Total (R$)":         resumo["total_geral"],
             "Faturamento Monofasico (R$)":    resumo["total_monofasico"],
@@ -403,24 +550,42 @@ def gerar_excel(itens, resumo):
     return output.getvalue()
 
 
-def gerar_csv(dados_apuracao):
-    df = pd.DataFrame(dados_apuracao)
-    df.columns = ["Mes", "Receita Total", "Rec. Monofasica",
-                  "Rec. Tributavel", "DAS Pago", "DAS Correto", "Credito"]
+def gerar_csv_apuracao(apuracao):
+    linhas = []
+    for r in apuracao:
+        linhas.append({
+            "Mes":              r["mes"],
+            "RBT12":            r["rbt12"],
+            "Faixa":            r["faixa"],
+            "Aliq. Efetiva":    r["aliquota_efetiva"] if r["aliquota_efetiva"] is not None else "",
+            "Rec. Total":       r["receita_total"],
+            "Rec. Monofasica":  r["receita_monofasica"],
+            "Rec. Tributavel":  r["receita_tributavel"],
+            "DAS Pago":         r["das_pago"]      if r["das_pago"]      is not None else "",
+            "DAS Correto":      r["das_correto"]   if r["das_correto"]   is not None else "",
+            "Credito Bruto":    r["credito_bruto"] if r["credito_bruto"] is not None else "",
+            "% PIS+COFINS":     r["pct_pis_cofins"] if r["pct_pis_cofins"] is not None else "",
+            "Credito Real":     r["credito_real"]  if r["credito_real"]  is not None else "",
+        })
+    df = pd.DataFrame(linhas)
     return df.to_csv(index=False, sep=";", decimal=",").encode("utf-8")
 
 
 # ─────────────────────────────────────────────────────────────
-#  12. HELPERS DE FORMATACAO
+#  15. HELPERS DE FORMATACAO
 # ─────────────────────────────────────────────────────────────
 def brl(v):
-    return "R$ {:,.2f}".format(v).replace(",", "X").replace(".", ",").replace("X", ".")
+    if v is None:
+        return "–"
+    return "R$ {:,.2f}".format(v).replace(",","X").replace(".",",").replace("X",".")
 
-def pct(v):
-    return "{:.4f}%".format(v * 100)
+def pct(v, casas=4):
+    if v is None:
+        return "–"
+    fmt = "{{:.{}f}}%".format(casas)
+    return fmt.format(v * 100)
 
 def fmt_mes(m):
-    """Converte 'YYYY-MM' para 'MMM/YYYY' (ex: 'mar/2024')."""
     try:
         return datetime.strptime(m, "%Y-%m").strftime("%b/%Y")
     except Exception:
@@ -428,7 +593,7 @@ def fmt_mes(m):
 
 
 # ─────────────────────────────────────────────────────────────
-#  13. INTERFACE STREAMLIT
+#  16. INTERFACE STREAMLIT
 # ─────────────────────────────────────────────────────────────
 def main():
     st.set_page_config(
@@ -438,7 +603,10 @@ def main():
     )
 
     st.title("📊 Analisador PIS/COFINS Monofasico + Apuracao PGDAS-D")
-    st.caption("Simples Nacional · Regime de Revenda · Classificacao por NCM (Tabela 4.3.10 EFD-Contribuicoes)")
+    st.caption(
+        "Simples Nacional · Regime de Revenda · "
+        "RBT12 dinamico · Faixa mensal · Credito real PIS/COFINS"
+    )
     st.divider()
 
     # ── SIDEBAR ───────────────────────────────────────────────
@@ -446,47 +614,58 @@ def main():
         st.header("Configuracoes")
 
         st.subheader("Simples Nacional")
-        anexo = st.selectbox(
+        nome_anexo = st.selectbox(
             "Anexo",
             list(TABELAS_SIMPLES.keys()),
             help="Selecione o anexo da sua atividade"
         )
-        rbt12 = st.number_input(
-            "RBT12 – Receita Bruta 12 meses (R$)",
+
+        rbt12_inicial = st.number_input(
+            "RBT12 anterior ao periodo (R$)",
             min_value=0.0,
             value=360_000.0,
             step=1_000.0,
             format="%.2f",
-            help="Receita bruta acumulada dos ultimos 12 meses antes do periodo apurado"
+            help=(
+                "Informe a receita bruta acumulada dos 12 meses "
+                "anteriores ao primeiro mes dos XMLs carregados. "
+                "Usado como base para o calculo dinamico do RBT12."
+            )
         )
 
         st.markdown("---")
-        st.subheader("PIS/COFINS")
+        st.subheader("PIS/COFINS (estimativa simples)")
         aliquota_pc = st.number_input(
-            "Aliquota estimativa PIS+COFINS (%)",
+            "Aliquota estimativa (%)",
             min_value=0.0, max_value=100.0,
             value=9.25, step=0.05, format="%.2f",
-            help="Usada no calculo da estimativa simples de credito"
         )
         aliquota_decimal = aliquota_pc / 100
 
         st.markdown("---")
         st.markdown(
-            "**Tabela NCM carregada:**  \n"
-            "`{}` NCMs monofasicos".format(len(TABELA_NCM_MONOFASICO))
+            "**Tabela NCM:**  \n"
+            "`{}` NCMs monofasicos  \n"
+            "_Edite `TABELA_NCM_MONOFASICO` para atualizar._".format(
+                len(TABELA_NCM_MONOFASICO)
+            )
         )
 
-        # Preview aliquota efetiva
-        if rbt12 > 0:
-            ef, nom, ded, faixa = calcular_aliquota_efetiva(rbt12, anexo)
-            st.markdown("---")
-            st.subheader("Preview Aliquota")
-            if ef is None:
-                st.error("RBT12 acima do limite do Simples (R$ 4,8M)")
-            else:
-                st.metric("Aliquota Efetiva", pct(ef))
-                st.caption("Faixa {} · Nominal {} · Deducao {}".format(
-                    faixa, pct(nom), brl(ded)))
+        # Preview reparticao do anexo selecionado
+        st.markdown("---")
+        with st.expander("Ver reparticao do anexo"):
+            rep = REPARTICAO.get(nome_anexo, {})
+            rows_rep = []
+            for faixa_n, tributos in rep.items():
+                pis_v    = tributos.get("pis", 0.0)
+                cofins_v = tributos.get("cofins", 0.0)
+                rows_rep.append({
+                    "Faixa": faixa_n,
+                    "PIS":    pct(pis_v, 2),
+                    "COFINS": pct(cofins_v, 2),
+                    "PIS+COFINS": pct(pis_v + cofins_v, 2),
+                })
+            st.dataframe(pd.DataFrame(rows_rep), hide_index=True, use_container_width=True)
 
     # ── UPLOAD ────────────────────────────────────────────────
     st.subheader("1  Upload dos XMLs de NF-e")
@@ -514,9 +693,9 @@ def main():
     # ── METRICAS GERAIS ───────────────────────────────────────
     st.subheader("2  Resumo Geral")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Faturamento Total",          brl(resumo["total_geral"]))
-    c2.metric("Faturamento Monofasico",     brl(resumo["total_monofasico"]))
-    c3.metric("Faturamento Nao Monofasico", brl(resumo["total_nao_mono"]))
+    c1.metric("Faturamento Total",           brl(resumo["total_geral"]))
+    c2.metric("Faturamento Monofasico",      brl(resumo["total_monofasico"]))
+    c3.metric("Faturamento Nao Monofasico",  brl(resumo["total_nao_mono"]))
     c4.metric(
         "Estimativa PIS+COFINS ({:.2f}%)".format(aliquota_pc),
         brl(resumo["estimativa_recup"])
@@ -532,84 +711,114 @@ def main():
         graf["Inconsistencias"] = resumo["total_inconsist"]
     st.bar_chart(pd.DataFrame.from_dict(graf, orient="index", columns=["Valor (R$)"]))
 
-    # ── APURACAO PGDAS-D ──────────────────────────────────────
-    st.subheader("4  Apuracao PGDAS-D – Credito por Monofasico")
+    # ── APURACAO PGDAS-D AVANCADA ─────────────────────────────
+    st.subheader("4  Apuracao PGDAS-D Avancada – Credito Real PIS/COFINS")
 
-    ef, nom, ded, faixa = calcular_aliquota_efetiva(rbt12, anexo)
+    agrupado  = agrupar_por_mes(itens)
+    apuracao  = apurar_periodo(agrupado, nome_anexo, rbt12_inicial)
 
-    if ef is None:
-        st.error(
-            "RBT12 informado ({}}) excede o limite maximo do Simples Nacional "
-            "(R$ 4.800.000,00). Verifique o valor informado.".format(brl(rbt12))
-        )
-    elif rbt12 == 0:
-        st.warning("Informe o RBT12 na sidebar para calcular a apuracao.")
-    else:
-        # Pipeline de apuracao
-        agrupado   = agrupar_por_mes(itens)
-        com_das    = calcular_das(agrupado, ef)
-        apuracao, total_credito = calcular_credito(com_das)
+    # Alertas de fora do Simples
+    alertas = [r for r in apuracao if r.get("alerta")]
+    for al in alertas:
+        st.warning("Mes {}: {}".format(fmt_mes(al["mes"]), al["alerta"]))
 
-        # Tabela principal
-        linhas = []
-        for row in apuracao:
-            linhas.append({
-                "Mes":             fmt_mes(row["mes"]),
-                "Receita Total":   brl(row["receita_total"]),
-                "Monofasico":      brl(row["receita_monofasica"]),
-                "Tributavel":      brl(row["receita_tributavel"]),
-                "DAS Pago":        brl(row["das_pago"]),
-                "DAS Correto":     brl(row["das_correto"]),
-                "Credito Mensal":  brl(row["credito"]),
-            })
+    # Monta tabela exibicao
+    linhas = []
+    for r in apuracao:
+        linhas.append({
+            "Mes":            fmt_mes(r["mes"]),
+            "RBT12":          brl(r["rbt12"]),
+            "Faixa":          r["faixa"],
+            "Aliq. Nominal":  pct(r.get("aliquota_nominal"), 2),
+            "Aliq. Efetiva":  pct(r.get("aliquota_efetiva"), 4),
+            "Rec. Total":     brl(r["receita_total"]),
+            "Rec. Monof.":    brl(r["receita_monofasica"]),
+            "Rec. Tributavel":brl(r["receita_tributavel"]),
+            "DAS Pago":       brl(r.get("das_pago")),
+            "DAS Correto":    brl(r.get("das_correto")),
+            "Cred. Bruto":    brl(r.get("credito_bruto")),
+            "% PIS+COF":      pct(r.get("pct_pis_cofins"), 2),
+            "Cred. Real":     brl(r.get("credito_real")),
+        })
 
-        df_apuracao = pd.DataFrame(linhas)
-        st.dataframe(df_apuracao, use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(linhas), use_container_width=True, hide_index=True)
 
-        # Totais
-        st.markdown("---")
-        t1, t2, t3, t4 = st.columns(4)
-        t1.metric("Aliquota Efetiva",    pct(ef))
-        t2.metric("Total DAS Pago",      brl(sum(r["das_pago"]    for r in apuracao)))
-        t3.metric("Total DAS Correto",   brl(sum(r["das_correto"] for r in apuracao)))
-        t4.metric("Credito Total Apurado", brl(total_credito),
-                  delta="a recuperar" if total_credito > 0 else None)
+    # Totais
+    st.markdown("---")
+    valid = [r for r in apuracao if r.get("credito_real") is not None]
+    total_cred_bruto = sum(r["credito_bruto"] for r in valid)
+    total_cred_real  = sum(r["credito_real"]  for r in valid)
+    total_das_pago   = sum(r["das_pago"]      for r in valid)
+    total_das_corr   = sum(r["das_correto"]   for r in valid)
 
-        if total_credito <= 0:
-            st.info("Nenhum credito apurado no periodo. Verifique os XMLs e o RBT12.")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total DAS Pago",       brl(total_das_pago))
+    m2.metric("Total DAS Correto",    brl(total_das_corr))
+    m3.metric("Credito Bruto Total",  brl(total_cred_bruto))
+    m4.metric(
+        "Credito Real PIS/COFINS",
+        brl(total_cred_real),
+        delta="a recuperar" if total_cred_real > 0 else None
+    )
 
-        # Alertas
-        sem_data = [i for i in itens if i["mes"] == "SEM-DATA"]
-        if sem_data:
-            st.warning(
-                "{} item(ns) sem data de emissao (dhEmi ausente). "
-                "Esses itens foram agrupados como 'SEM-DATA'.".format(len(sem_data))
-            )
+    if total_cred_real <= 0 and valid:
+        st.info("Nenhum credito real apurado. Verifique os XMLs, o RBT12 anterior e o anexo selecionado.")
 
-        # Exportar CSV da apuracao
-        csv_bytes = gerar_csv([
-            [r["mes"], r["receita_total"], r["receita_monofasica"],
-             r["receita_tributavel"], r["das_pago"], r["das_correto"], r["credito"]]
-            for r in apuracao
-        ])
-        st.download_button(
-            label="Baixar apuracao CSV",
-            data=csv_bytes,
-            file_name="apuracao_pgdas.csv",
-            mime="text/csv",
-        )
+    # Nota metodologica
+    with st.expander("Metodologia de calculo"):
+        st.markdown("""
+**RBT12 dinamico:**
+Para o primeiro mes, o RBT12 e igual ao valor informado como *RBT12 anterior ao periodo*.
+Para os meses seguintes, a janela deslizante de 12 meses e atualizada automaticamente.
 
-    # ── INCONSISTENCIAS ───────────────────────────────────────
+**Aliquota efetiva (PGDAS-D):**
+```
+aliquota_efetiva = (RBT12 × aliquota_nominal − deducao) / RBT12
+```
+
+**DAS pago vs. DAS correto:**
+```
+DAS_pago    = Receita Total     × aliquota_efetiva
+DAS_correto = Rec. Tributavel   × aliquota_efetiva
+Credito bruto = DAS_pago − DAS_correto
+```
+
+**Credito real PIS/COFINS:**
+```
+Credito_real = Credito_bruto × (% PIS + % COFINS da reparticao)
+```
+
+A tabela de reparticao segue a LC 123/2006 e Resolucao CGSN 140/2018.
+Na faixa 1 do Anexo I, PIS e COFINS sao zero (isencao).
+        """)
+
+    # Export CSV
+    csv_bytes = gerar_csv_apuracao(apuracao)
+    st.download_button(
+        label="Baixar apuracao CSV",
+        data=csv_bytes,
+        file_name="apuracao_pgdas_avancado.csv",
+        mime="text/csv",
+    )
+
+    # ── ALERTAS INCONSISTENCIAS ───────────────────────────────
     inconsist = df[df["classificacao"] == "INCONSISTENCIA"]
     if not inconsist.empty:
-        st.subheader("Inconsistencias Encontradas")
+        st.subheader("Inconsistencias de NCM")
         st.warning("{} item(ns) com NCM ausente ou invalido.".format(len(inconsist)))
         st.dataframe(
-            inconsist[["arquivo", "descricao", "ncm", "valor", "motivo"]].rename(columns={
+            inconsist[["arquivo","descricao","ncm","valor","motivo"]].rename(columns={
                 "arquivo":"Arquivo","descricao":"Descricao",
                 "ncm":"NCM","valor":"Valor (R$)","motivo":"Motivo"
             }),
             use_container_width=True,
+        )
+
+    sem_data = df[df["mes"] == "SEM-DATA"]
+    if not sem_data.empty:
+        st.warning(
+            "{} item(ns) sem data de emissao (dhEmi ausente). "
+            "Agrupados como 'SEM-DATA'.".format(len(sem_data))
         )
 
     # ── TABELA DE ITENS ───────────────────────────────────────
